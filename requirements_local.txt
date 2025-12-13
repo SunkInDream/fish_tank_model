@@ -1,6 +1,0 @@
-# 本地训练环境（PyTorch）
-torch>=1.10.0
-numpy>=1.21.0  # 进度条
-
-# MindSpore（可选，用于模型转换）
-# mindspore>=2.0.0  # 如果本地有GPU可以安装，否则在Atlas上安装

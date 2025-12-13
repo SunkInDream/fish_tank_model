@@ -1,3 +1,0 @@
-# Atlas 200dk NPU推理环境（MindSpore）
-mindspore>=2.0.0
-numpy>=1.21.0
