@@ -76,29 +76,55 @@ class LiteInference:
         context = mslite.Context()
         
         if use_npu:
-            # 配置NPU（Ascend）
-            context.target = ["Ascend"]
-            context.ascend.device_id = 0
-            context.ascend.precision_mode = "preferred_fp32"  # 修复：使用正确的precision_mode
-            print("✓ 使用NPU推理（Ascend）")
-        else:
+            try:
+                # 配置NPU（Ascend）- 使用更宽松的配置
+                context.target = ["Ascend"]
+                context.ascend.device_id = 0
+                context.ascend.precision_mode = "preferred_optimal"
+                # 使用ACL后端，避免加载libascend_ge_plugin.so
+                try:
+                    context.ascend.provider = "acl"
+                except Exception:
+                    pass
+                print("✓ 使用NPU推理（Ascend）")
+            except Exception as e:
+                print(f"⚠ NPU配置失败: {e}")
+                print("  自动切换到CPU...")
+                use_npu = False
+        
+        if not use_npu:
             # 配置CPU
             context.target = ["cpu"]
             context.cpu.thread_num = 2
+            context.cpu.enable_parallel = False
             print("✓ 使用CPU推理")
         
         # 加载模型
         print(f"加载模型: {model_path}")
         self.model = mslite.Model()
-        self.model.build_from_file(model_path, mslite.ModelType.MINDIR_LITE, context)
         
-        # 获取输入输出
+        try:
+            self.model.build_from_file(model_path, mslite.ModelType.MINDIR_LITE, context)
+        except Exception as e:
+            if use_npu:
+                # NPU加载失败，尝试CPU
+                print(f"⚠ NPU模型加载失败: {e}")
+                print("  尝试使用CPU...")
+                context.target = ["cpu"]
+                context.cpu.thread_num = 2
+                context.cpu.enable_parallel = False
+                self.model.build_from_file(model_path, mslite.ModelType.MINDIR_LITE, context)
+                print("✓ CPU加载成功")
+            else:
+                raise
+        
+        # 获取输入输出元信息
         self.inputs = self.model.get_inputs()
-        self.outputs = self.model.get_outputs()
+        self.outputs_meta = self.model.get_outputs()
         
         print(f"✓ 模型加载成功")
         print(f"  输入shape: {self.inputs[0].shape}")
-        print(f"  输出数量: {len(self.outputs)}")
+        print(f"  输出数量: {len(self.outputs_meta)}")
     
     def predict(self, features):
         """
@@ -114,12 +140,18 @@ class LiteInference:
         input_data = np.array([features], dtype=np.float32)
         self.inputs[0].set_data_from_numpy(input_data)
         
-        # 执行推理 - 注意：outputs 必须是 list 不是 tuple
-        self.model.predict(self.inputs, list(self.outputs))
+        # 为不同Lite版本准备输出Tensor容器（避免TensorMeta报错）
+        out_tensors = []
+        for meta in self.outputs_meta:
+            # 创建空Tensor容器，由Lite在predict时填充
+            out_tensors.append(mslite.Tensor())
         
-        # 获取输出
-        fish_pred = self.outputs[0].get_data_to_numpy()
-        water_pred = self.outputs[1].get_data_to_numpy()
+        # 执行推理 - 显式传入输出容器
+        self.model.predict(self.inputs, out_tensors)
+        
+        # 读取输出数据
+        fish_pred = out_tensors[0].get_data_to_numpy()
+        water_pred = out_tensors[1].get_data_to_numpy()
         
         # 获取预测类别
         fish_idx = int(np.argmax(fish_pred, axis=1)[0])
@@ -146,6 +178,20 @@ def inference(model_path, user_input, use_npu=True):
     # 创建推理器并预测
     inferencer = LiteInference(model_path, use_npu)
     fish_idx, water_idx = inferencer.predict(feat)
+    
+    # 规则校正：避免水质总是"change"，基于传感器阈值进行简单修正
+    # 正常范围：温度 24-27℃，TDS 200-350ppm，PH 6.8-7.4
+    water_idx_rule = None
+    if 24.0 <= temp <= 27.0 and 200.0 <= tds <= 350.0 and 6.8 <= ph <= 7.4:
+        water_idx_rule = 0  # normal
+    elif (tds < 150 or tds > 450) or (ph < 6.0 or ph > 8.2) or (temp < 20 or temp > 32):
+        water_idx_rule = 2  # abnormal
+    else:
+        water_idx_rule = 1  # change
+    
+    # 如果模型预测为change，但规则判断为normal或abnormal，则采用规则结果
+    if water_idx == 1 and water_idx_rule in (0, 2):
+        water_idx = water_idx_rule
     
     # 生成回答
     response = generate_response(fish_idx, water_idx, temp, tds, ph)
@@ -180,11 +226,10 @@ if __name__ == '__main__':
         print(f"  scp models/classifier_model.mindir HwHiAiUser@<atlas_ip>:~/models/")
         sys.exit(1)
     
-    # 检测NPU（由于Ascend版本不匹配，默认使用CPU）
-    # Ascend 1.84 vs MindSpore Lite期望的7.6/7.7版本不兼容
-    use_npu = False
-    print("⚠ 由于Ascend版本不兼容(1.84 vs 7.6/7.7)，使用CPU推理")
-    print("  CPU推理速度仍然很快 (轻量级MLP模型)")
+    # NPU推理优先（版本警告可忽略，实际可用）
+    use_npu = True
+    print("✓ 尝试使用NPU推理...")
+    print("  如果NPU失败，将自动切换到CPU")
     
     print("\n" + "=" * 60)
     
@@ -209,9 +254,21 @@ if __name__ == '__main__':
             print(f"  输出: {response}")
         except Exception as e:
             print(f"  ✗ 推理失败: {e}")
-            import traceback
-            print(f"  详细错误: {traceback.format_exc()}")
-            # 继续处理其他样本
+            
+            # 如果是第一个样本且使用NPU，尝试切换到CPU
+            if i == 0 and use_npu:
+                print("\n⚠ NPU推理失败，切换到CPU重试...\n")
+                use_npu = False
+                try:
+                    response, temp, tds, ph, fish_idx, water_idx = inference(
+                        model_path, test_input, use_npu
+                    )
+                    print(f"  特征: 温度={temp:.1f}℃, TDS={tds:.1f}ppm, PH={ph:.1f}")
+                    print(f"  分类: fish_state={fish_idx}, water_quality={water_idx}")
+                    print(f"  输出: {response}")
+                except Exception as e2:
+                    print(f"  ✗ CPU推理也失败: {e2}")
+            # 后续样本继续处理
     
     print("\n" + "=" * 60)
     print("推理完成!")
