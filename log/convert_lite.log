@@ -1,0 +1,14 @@
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.244.361 [mindspore-lite/src/extendrt/cxx_api/dlutils.h:77] FindSoPath] Could not find target so libascend_pass_plugin.so in /home/HwHiAiUser/mindspore-lite-2.7.1-linux-aarch64/tools/converter/lib/
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.244.518 [mindspore-lite/tools/converter/adapter/acl/plugin/acl_pass_plugin.cc:58] GetPluginSoPath] Get real path of libascend_pass_plugin.so failed.
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.244.548 [mindspore-lite/tools/converter/adapter/acl/plugin/acl_pass_plugin.cc:80] CreateAclPassInner] Failed to get path of libascend_pass_plugin.so
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.244.575 [mindspore-lite/tools/converter/anf_transform.cc:485] RunConvertPass] Failed to create acl pass
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.244.599 [mindspore-lite/tools/converter/anf_transform.cc:682] RunPass] Run convert pass failed.
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.244.622 [mindspore-lite/tools/converter/anf_transform.cc:783] TransformFuncGraph] Proc online transform failed.
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.244.780 [mindspore-lite/tools/converter/anf_transform.cc:894] Transform] optimizer failed.
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.244.814 [mindspore-lite/tools/converter/converter_funcgraph.cc:646] Optimize] Transform anf graph failed.
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.245.162 [mindspore-lite/tools/converter/converter.cc:1211] HandleGraphCommon] Optimize func graph failed: -2 NULL pointer returned.
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.245.640 [mindspore-lite/tools/converter/converter.cc:1160] Convert] Handle graph failed: -2 NULL pointer returned.
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.245.681 [mindspore-lite/tools/converter/converter.cc:1353] RunConverter] Convert model failed
+[ERROR] LITE(2467,fffef9455010,converter_lite):2025-12-06-07:09:29.245.727 [mindspore-lite/tools/converter/cxx_api/converter.cc:361] Convert] Convert model failed, ret=NULL pointer returned.
+ERROR [mindspore-lite/tools/converter/converter_lite/main.cc:107] main] Convert failed. Ret: NULL pointer returned.
+Convert failed. Ret: NULL pointer returned.
