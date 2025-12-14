@@ -114,8 +114,8 @@ class LiteInference:
         input_data = np.array([features], dtype=np.float32)
         self.inputs[0].set_data_from_numpy(input_data)
         
-        # 执行推理
-        self.model.predict(self.inputs, self.outputs)
+        # 执行推理 - 注意：outputs 必须是 list 不是 tuple
+        self.model.predict(self.inputs, list(self.outputs))
         
         # 获取输出
         fish_pred = self.outputs[0].get_data_to_numpy()
@@ -180,14 +180,11 @@ if __name__ == '__main__':
         print(f"  scp models/classifier_model.mindir HwHiAiUser@<atlas_ip>:~/models/")
         sys.exit(1)
     
-    # 检测NPU
-    try:
-        # 尝试使用NPU
-        use_npu = True
-        print("✓ 尝试使用NPU...")
-    except:
-        use_npu = False
-        print("⚠ NPU不可用，使用CPU")
+    # 检测NPU（由于Ascend版本不匹配，默认使用CPU）
+    # Ascend 1.84 vs MindSpore Lite期望的7.6/7.7版本不兼容
+    use_npu = False
+    print("⚠ 由于Ascend版本不兼容(1.84 vs 7.6/7.7)，使用CPU推理")
+    print("  CPU推理速度仍然很快 (轻量级MLP模型)")
     
     print("\n" + "=" * 60)
     
@@ -212,9 +209,9 @@ if __name__ == '__main__':
             print(f"  输出: {response}")
         except Exception as e:
             print(f"  ✗ 推理失败: {e}")
-            if i == 0:  # 第一个样本失败就退出
-                print("\n尝试使用CPU...")
-                use_npu = False
+            import traceback
+            print(f"  详细错误: {traceback.format_exc()}")
+            # 继续处理其他样本
     
     print("\n" + "=" * 60)
     print("推理完成!")

@@ -48,17 +48,22 @@ converter_lite \
 
 ### 方案3: 如果converter_lite不可用
 
-检查MindSpore Lite安装:
+检查并安装工具包:
 ```bash
-# 1. 检查是否安装
-which converter_lite
+# 1. 检查是否有 converter_lite
+which converter_lite || echo "converter_lite 不存在"
 
-# 2. 如果未找到，检查环境
-conda activate ms_lite39
-which converter_lite
+# 2. （推荐）安装包含 converter 的Lite工具包，并加入PATH
+#    解压后的路径示例: ~/tools/mindspore-lite/converter
+export PATH="~/tools/mindspore-lite/converter:$PATH"
+echo 'export PATH="~/tools/mindspore-lite/converter:$PATH"' >> ~/.bashrc
+source ~/.bashrc
 
-# 3. 如果还是没有，需要安装MindSpore Lite工具包
-pip install mindspore-lite
+# 3. 重试转换脚本
+./convert_on_atlas.sh
+
+# 4. 如果仍不可用，尝试Python回退（自动触发）
+python convert_on_atlas_py.py
 ```
 
 ## 预期结果
@@ -82,6 +87,10 @@ models/classifier_model.ms  (大约 30-50KB)
    The model buffer is invalid
    ```
    原因: MindSpore Lite需要.ms格式，不能直接加载.mindir
+
+   3. **converter_lite缺失**:
+      - 现象: `command not found`
+      - 处理: 安装Lite工具包，或使用Python回退脚本 `convert_on_atlas_py.py`
 
 ## 验证推理
 

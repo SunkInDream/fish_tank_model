@@ -1,6 +1,7 @@
 """
 轻量级分类器训练 - 分类 + 模板填充方案
 极快训练，100%稳定输出，易转MindIR
+支持本地直接生成MindSpore Lite (.ms)文件
 """
 import torch
 import torch.nn as nn
@@ -8,6 +9,8 @@ import json
 import numpy as np
 import os
 import re
+import subprocess
+import sys
 
 # 简单的MLP分类器
 class FishTankClassifier(nn.Module):
@@ -248,6 +251,232 @@ def train_model():
     print("  ✓ 转MindIR: 极简单")
     print("  ✓ NPU推理: 极快速")
     print("=" * 60)
+    
+    return model
+
+def convert_to_mindspore():
+    """转换为MindSpore格式"""
+    print("\n" + "=" * 60)
+    print("转换为 MindSpore 格式")
+    print("=" * 60)
+    
+    try:
+        import mindspore as ms
+        from mindspore import nn as ms_nn
+        from mindspore import ops, Tensor, Parameter
+        from mindspore.train.serialization import export
+        
+        print("✓ MindSpore 已导入")
+        ms.set_context(mode=ms.GRAPH_MODE, device_target="CPU")
+        
+        # 定义MindSpore版本的模型
+        class MSFishTankClassifier(ms_nn.Cell):
+            def __init__(self, input_dim=3, hidden_dim=64):
+                super(MSFishTankClassifier, self).__init__()
+                self.fc1 = ms_nn.Dense(input_dim, hidden_dim)
+                self.fc2 = ms_nn.Dense(hidden_dim, hidden_dim)
+                self.fish_state = ms_nn.Dense(hidden_dim, 3)
+                self.water_quality = ms_nn.Dense(hidden_dim, 3)
+                self.relu = ms_nn.ReLU()
+                self.dropout = ms_nn.Dropout(p=0.3)
+            
+            def construct(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.dropout(x)
+                x = self.relu(self.fc2(x))
+                x = self.dropout(x)
+                fish = self.fish_state(x)
+                water = self.water_quality(x)
+                return fish, water
+        
+        # 加载PyTorch权重
+        print("\n加载 PyTorch 权重...")
+        pt_checkpoint = torch.load('models/classifier_model.pth', map_location='cpu', weights_only=False)
+        pt_state = pt_checkpoint['model_state_dict']
+        
+        # 创建MindSpore模型
+        ms_model = MSFishTankClassifier(input_dim=3, hidden_dim=64)
+        
+        # 手动转换权重
+        print("转换权重...")
+        param_dict = {}
+        
+        # PyTorch -> MindSpore 参数名映射
+        mapping = {
+            'fc1.weight': 'fc1.weight',
+            'fc1.bias': 'fc1.bias',
+            'fc2.weight': 'fc2.weight',
+            'fc2.bias': 'fc2.bias',
+            'fish_state.weight': 'fish_state.weight',
+            'fish_state.bias': 'fish_state.bias',
+            'water_quality.weight': 'water_quality.weight',
+            'water_quality.bias': 'water_quality.bias'
+        }
+        
+        for pt_name, ms_name in mapping.items():
+            if pt_name in pt_state:
+                pt_param = pt_state[pt_name].detach().numpy()
+                param_dict[ms_name] = Parameter(Tensor(pt_param, ms.float32), name=ms_name)
+        
+        # 加载参数
+        ms.load_param_into_net(ms_model, param_dict)
+        print(f"✓ 已转换 {len(param_dict)} 个参数")
+        
+        # 保存为checkpoint
+        print("\n保存 MindSpore checkpoint...")
+        ms.save_checkpoint(ms_model, 'models/classifier_model.ckpt')
+        ckpt_size = os.path.getsize('models/classifier_model.ckpt') / 1024
+        print(f"✓ 已保存: models/classifier_model.ckpt ({ckpt_size:.2f} KB)")
+        
+        # 导出为MindIR
+        print("\n导出为 MindIR 格式...")
+        ms_model.set_train(False)
+        input_tensor = Tensor(np.zeros([1, 3], dtype=np.float32))
+        export(ms_model, input_tensor, file_name='models/classifier_model', file_format='MINDIR')
+        mindir_size = os.path.getsize('models/classifier_model.mindir') / 1024
+        print(f"✓ 已导出: models/classifier_model.mindir ({mindir_size:.2f} KB)")
+        
+        return True
+        
+    except ImportError as e:
+        print(f"\n✗ MindSpore 未安装: {e}")
+        print("请安装: pip install mindspore")
+        return False
+    except Exception as e:
+        print(f"\n✗ 转换失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def convert_to_lite():
+    """转换为MindSpore Lite格式 (.ms文件)"""
+    print("\n" + "=" * 60)
+    print("转换为 MindSpore Lite 格式")
+    print("=" * 60)
+    
+    mindir_path = "models/classifier_model.mindir"
+    output_path = "models/classifier_model"
+    ms_path = output_path + ".ms"
+    
+    # 检查MindIR文件
+    if not os.path.exists(mindir_path):
+        print(f"✗ 未找到 {mindir_path}")
+        return False
+    
+    print(f"\n✓ 找到 MindIR 文件: {mindir_path}")
+    print(f"  大小: {os.path.getsize(mindir_path)/1024:.2f} KB")
+    
+    # 方法1: 尝试命令行工具
+    print("\n[方法1] 尝试 converter_lite 命令行工具...")
+    cmd = [
+        "converter_lite",
+        "--fmk=MINDIR",
+        f"--modelFile={mindir_path}",
+        f"--outputFile={output_path}",
+        "--optimize=general"
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0 and os.path.exists(ms_path):
+            ms_size = os.path.getsize(ms_path) / 1024
+            print(f"✓ 转换成功: {ms_path} ({ms_size:.2f} KB)")
+            return True
+        else:
+            print(f"✗ 命令行工具失败: {result.stderr if result.stderr else '未找到命令'}")
+    except FileNotFoundError:
+        print("✗ converter_lite 命令不存在")
+    except subprocess.TimeoutExpired:
+        print("✗ 转换超时")
+    except Exception as e:
+        print(f"✗ 命令执行出错: {e}")
+    
+    # 方法2: 尝试Python API
+    print("\n[方法2] 尝试 MindSpore Lite Python API...")
+    try:
+        import mindspore_lite as mslite
+        print("✓ mindspore_lite 已导入")
+        
+        # 创建转换器
+        converter = mslite.Converter()
+        converter.fmk = mslite.FmkType.MINDIR
+        converter.model_file = mindir_path
+        converter.output_file = output_path
+        converter.optimize = "general"
+        
+        # 执行转换
+        print("执行转换...")
+        converter.converter()
+        
+        if os.path.exists(ms_path):
+            ms_size = os.path.getsize(ms_path) / 1024
+            print(f"✓ 转换成功: {ms_path} ({ms_size:.2f} KB)")
+            return True
+        else:
+            print("✗ 未生成 .ms 文件")
+            
+    except ImportError:
+        print("✗ mindspore_lite 未安装")
+        print("  安装: pip install mindspore-lite")
+    except AttributeError as e:
+        print(f"✗ API 调用错误: {e}")
+    except Exception as e:
+        print(f"✗ 转换失败: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    # 转换失败的提示
+    print("\n" + "=" * 60)
+    print("本地转换 .ms 文件失败")
+    print("=" * 60)
+    print("\n建议解决方案:")
+    print("1. 安装 MindSpore Lite:")
+    print("   pip install mindspore-lite")
+    print("\n2. 或在 Atlas 200dk 上转换:")
+    print("   - 上传 .mindir 文件到 Atlas")
+    print("   - 执行: ./convert_on_atlas.sh")
+    print("\n3. 当前已生成的文件:")
+    print("   ✓ models/classifier_model.pth (PyTorch)")
+    print("   ✓ models/classifier_model.ckpt (MindSpore)")
+    print("   ✓ models/classifier_model.mindir (MindIR)")
+    
+    return False
+
+def main():
+    """主函数"""
+    # 训练模型
+    model = train_model()
+    
+    # 转换为MindSpore格式
+    ms_success = convert_to_mindspore()
+    
+    # 转换为MindSpore Lite格式
+    if ms_success:
+        lite_success = convert_to_lite()
+        
+        print("\n" + "=" * 60)
+        print("训练和转换完成！")
+        print("=" * 60)
+        
+        # 显示生成的文件
+        print("\n生成的文件:")
+        for filename in ['classifier_model.pth', 'classifier_model.ckpt', 
+                         'classifier_model.mindir', 'classifier_model.ms']:
+            filepath = os.path.join('models', filename)
+            if os.path.exists(filepath):
+                size = os.path.getsize(filepath) / 1024
+                print(f"  ✓ {filename:30s} ({size:6.2f} KB)")
+            else:
+                print(f"  ✗ {filename:30s} (未生成)")
+        
+        if lite_success:
+            print("\n✓ 所有文件已生成！可以直接上传到 Atlas 200dk")
+        else:
+            print("\n⚠ .ms 文件未生成，需要在 Atlas 上转换")
+            print("  执行: upload_fixed.bat 上传文件")
+            print("  然后在 Atlas 上执行: ./convert_on_atlas.sh")
+    else:
+        print("\n⚠ MindSpore 转换失败，仅生成了 PyTorch 模型")
 
 if __name__ == '__main__':
-    train_model()
+    main()
